@@ -1,8 +1,6 @@
 # fse-unbuilt-refresh
 
-Standalone Python script that logs into the FSE web app, fetches the current list of airports with open/unbuilt FBO slots, refreshes `dbo.unbuilt_lots`, and updates the related state flags in `dbo.fbo_refresh_state`.
-
-This repo was split out from a larger ETL project. The original script depended on shared `fse_core` helpers; this version is self-contained and ready for a small public repo.
+Standalone Python script that logs into the FSE web app, fetches the current list of airports with open/unbuilt FBO slots, and writes the cleaned ICAO list to a JSON file.
 
 ## What it does
 
@@ -10,17 +8,13 @@ This repo was split out from a larger ETL project. The original script depended 
 2. Logs in with `FSE_USERNAME` / `FSE_PASSWORD`.
 3. Calls `https://server.fseconomy.net/rest/api2/map/fbos/open`.
 4. Extracts unique ICAO codes.
-5. Rebuilds `dbo.unbuilt_lots`.
-6. Updates `dbo.fbo_refresh_state` so your downstream reactivation logic keeps working.
+5. Saves a JSON payload containing the timestamp, total count, and ICAO list.
 
 ## Requirements
 
 - Python 3.11+
-- SQL Server-accessible database containing:
-  - `dbo.unbuilt_lots`
-  - `dbo.fbo_refresh_state`
-- SQLAlchemy-compatible `DB_URL`
-- SQL Server ODBC driver installed if you are using `pyodbc`
+- `requests` and `python-dotenv` (installed via `requirements.txt`)
+- `.env` populated with FSE credentials
 
 ## Setup
 
@@ -36,7 +30,6 @@ Fill in `.env` with your real values.
 ## Example `.env`
 
 ```env
-DB_URL=mssql+pyodbc://USER:PASSWORD@SERVER/DATABASE?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes
 FSE_USERNAME=your_fse_username
 FSE_PASSWORD=your_fse_password
 FSE_TIMEOUT=30
@@ -44,50 +37,46 @@ FSE_TIMEOUT=30
 
 ## Usage
 
-Dry run:
+Dry run (fetch + log sample ICAOs, no file output):
 
 ```powershell
 python .\refresh_unbuilt_lots.py --dry-run --verbose
 ```
 
-Real run:
+Write JSON (defaults to `unbuilt_lots.json` in the repo root):
 
 ```powershell
-python .\refresh_unbuilt_lots.py --verbose
+python .\refresh_unbuilt_lots.py --output data/unbuilt_lots.json --verbose
 ```
 
 Optional arguments:
 
 ```text
 --timeout <seconds>     HTTP timeout, defaults to FSE_TIMEOUT or 30
---chunk-size <rows>     Insert batch size, default 1000
---dry-run               Fetch and preview only, do not write to SQL
+--output <path>         Destination JSON file, defaults to unbuilt_lots.json
+--dry-run               Fetch and preview only, do not write a file
 --verbose               Enable debug logging
+```
+
+The JSON structure looks like:
+
+```json
+{
+  "generated_utc": "2024-04-09T03:31:57.123456+00:00",
+  "count": 42,
+  "icaos": ["KJFK", "CYTZ", "..."]
+}
 ```
 
 ## Notes
 
-- This version no longer downloads or writes a JSON file. It fetches directly from FSE and writes straight to SQL.
-- `dbo.unbuilt_lots` is fully rebuilt on each run.
-- `dbo.fbo_refresh_state` is still updated with the same current-state / reactivation behavior.
+- Each run overwrites the target JSON file.
 - Because this uses the website login flow rather than a service-key XML feed, it is a little more fragile if FSE changes their web auth/session behavior.
-
-## Minimal table expectations
-
-This script assumes:
-
-- `dbo.unbuilt_lots` has at least:
-  - `icao`
-- `dbo.fbo_refresh_state` has at least:
-  - `icao`
-  - `is_unbuilt_current`
-  - `reactivate_unbuilt_cleared`
-  - `last_unbuilt_cleared_utc`
-  - `reactivate_unbuilt_listed`
-  - `last_unbuilt_listed_utc`
-  - `last_reactivated_utc`
-  - `reactivated_reason`
 
 ## Security
 
 Do not commit `.env` or real credentials.
+
+## Credits
+
+Thanks to Piero and the [FSE Planner Helpers](https://github.com/piero-la-lune/FSE-Planner-Helpers) project for the original inspiration and groundwork that informed this simplified JSON exporter.
